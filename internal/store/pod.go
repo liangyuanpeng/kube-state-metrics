@@ -83,7 +83,7 @@ func podMetricFamilies(allowAnnotationsList, allowLabelsList []string) []generat
 		createPodStatusPhaseFamilyGenerator(),
 		createPodStatusReadyFamilyGenerator(),
 		createPodStatusReadyTimeFamilyGenerator(),
-		createPodStatusContainersReadyTimeFamilyGenerator(),
+		createPodStatusContainerReadyTimeFamilyGenerator(),
 		createPodStatusReasonFamilyGenerator(),
 		createPodStatusScheduledFamilyGenerator(),
 		createPodStatusScheduledTimeFamilyGenerator(),
@@ -1253,9 +1253,9 @@ func createPodStartTimeFamilyGenerator() generator.FamilyGenerator {
 	)
 }
 
-func createPodStatusContainersReadyTimeFamilyGenerator() generator.FamilyGenerator {
+func createPodStatusContainerReadyTimeFamilyGenerator() generator.FamilyGenerator {
 	return *generator.NewFamilyGenerator(
-		"kube_pod_status_containers_ready_time",
+		"kube_pod_status_container_ready_time",
 		"Readiness achieved time in unix timestamp for a pod containers.",
 		metric.Gauge,
 		"",
