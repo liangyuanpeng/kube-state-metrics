@@ -1439,7 +1439,6 @@ func TestPodStore(t *testing.T) {
 		        # TYPE kube_pod_status_ready gauge
 		        # TYPE kube_pod_status_ready_time gauge
 				kube_pod_status_ready_time{namespace="ns1",pod="pod1",uid="uid1"} 1.501666018e+09
-
 				kube_pod_status_ready{condition="false",namespace="ns1",pod="pod1",uid="uid1"} 0
 				kube_pod_status_ready{condition="true",namespace="ns1",pod="pod1",uid="uid1"} 1
 				kube_pod_status_ready{condition="unknown",namespace="ns1",pod="pod1",uid="uid1"} 0
