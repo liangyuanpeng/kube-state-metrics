@@ -46,6 +46,7 @@ func networkPolicyMetricFamilies(allowAnnotationsList, allowLabelsList []string)
 			metric.Gauge,
 			"",
 			wrapNetworkPolicyFunc(func(n *networkingv1.NetworkPolicy) *metric.Family {
+
 				return &metric.Family{
 					Metrics: []*metric.Metric{
 						{

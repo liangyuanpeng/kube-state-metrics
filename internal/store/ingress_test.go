@@ -19,6 +19,7 @@ package store
 import (
 	"testing"
 
+	v1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -33,12 +34,12 @@ func TestIngressStore(t *testing.T) {
 	// Fixed metadata on type and help text. We prepend this to every expected
 	// output so we only have to modify a single place when doing adjustments.
 	const metadata = `
-		# HELP kube_ingress_created Unix creation timestamp
-		# HELP kube_ingress_info Information about ingress.
-		# HELP kube_ingress_labels Kubernetes labels converted to Prometheus labels.
+		# HELP kube_ingress_created [STABLE] Unix creation timestamp
+		# HELP kube_ingress_info [STABLE] Information about ingress.
+		# HELP kube_ingress_labels [STABLE] Kubernetes labels converted to Prometheus labels.
 		# HELP kube_ingress_metadata_resource_version Resource version representing a specific version of ingress.
-		# HELP kube_ingress_path Ingress host, paths and backend service information.
-		# HELP kube_ingress_tls Ingress TLS host and secret information.
+		# HELP kube_ingress_path [STABLE] Ingress host, paths and backend service information.
+		# HELP kube_ingress_tls [STABLE] Ingress TLS host and secret information.
 		# TYPE kube_ingress_created gauge
 		# TYPE kube_ingress_info gauge
 		# TYPE kube_ingress_labels gauge
@@ -63,9 +64,9 @@ func TestIngressStore(t *testing.T) {
 				},
 			},
 			Want: `
-				# HELP kube_ingress_info Information about ingress.
+				# HELP kube_ingress_info [STABLE] Information about ingress.
 				# HELP kube_ingress_annotations Kubernetes annotations converted to Prometheus labels.
-				# HELP kube_ingress_labels Kubernetes labels converted to Prometheus labels.
+				# HELP kube_ingress_labels [STABLE] Kubernetes labels converted to Prometheus labels.
 				# HELP kube_ingress_metadata_resource_version Resource version representing a specific version of ingress.
 				# TYPE kube_ingress_info gauge
 				# TYPE kube_ingress_annotations gauge
@@ -144,6 +145,15 @@ func TestIngressStore(t *testing.T) {
 												},
 											},
 										},
+										{
+											Path: "/somepath2",
+											Backend: networkingv1.IngressBackend{
+												Resource: &v1.TypedLocalObjectReference{
+													Kind: "somekind",
+													Name: "somename",
+												},
+											},
+										},
 									},
 								},
 							},
@@ -159,6 +169,7 @@ func TestIngressStore(t *testing.T) {
 				kube_ingress_created{namespace="ns4",ingress="ingress4"} 1.501569018e+09
 				kube_ingress_labels{namespace="ns4",ingress="ingress4"} 1
 				kube_ingress_path{namespace="ns4",ingress="ingress4",host="somehost",path="/somepath",service_name="someservice",service_port="1234"} 1
+				kube_ingress_path{namespace="ns4",ingress="ingress4",host="somehost",path="/somepath2",service_name="",service_port=""} 1
 `,
 			MetricNames: []string{"kube_ingress_info", "kube_ingress_metadata_resource_version", "kube_ingress_created", "kube_ingress_labels", "kube_ingress_path", "kube_ingress_tls"},
 		},
