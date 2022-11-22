@@ -1426,18 +1426,34 @@ func TestPodStore(t *testing.T) {
 						{
 							Type:   v1.PodReady,
 							Status: v1.ConditionTrue,
+							LastTransitionTime: metav1.Time{
+								Time: time.Unix(1501666018, 0),
+							},
+						},
+						{
+							Type:   v1.ContainersReady,
+							Status: v1.ConditionTrue,
+							LastTransitionTime: metav1.Time{
+								Time: time.Unix(1501666018, 0),
+							},
 						},
 					},
 				},
 			},
 			Want: `
+				# HELP kube_pod_status_container_ready_time [ALPHA] Readiness achieved time in unix timestamp for a pod containers.
 				# HELP kube_pod_status_ready [STABLE] Describes whether the pod is ready to serve requests.
+				# HELP kube_pod_status_ready_time [ALPHA] Readiness achieved time in unix timestamp for a pod.
+				# TYPE kube_pod_status_container_ready_time gauge
 				# TYPE kube_pod_status_ready gauge
+				# TYPE kube_pod_status_ready_time gauge
+				kube_pod_status_container_ready_time{namespace="ns1",pod="pod1",uid="uid1"} 1.501666018e+09
+				kube_pod_status_ready_time{namespace="ns1",pod="pod1",uid="uid1"} 1.501666018e+09
 				kube_pod_status_ready{condition="false",namespace="ns1",pod="pod1",uid="uid1"} 0
 				kube_pod_status_ready{condition="true",namespace="ns1",pod="pod1",uid="uid1"} 1
 				kube_pod_status_ready{condition="unknown",namespace="ns1",pod="pod1",uid="uid1"} 0
 			`,
-			MetricNames: []string{"kube_pod_status_ready"},
+			MetricNames: []string{"kube_pod_status_ready", "kube_pod_status_ready_time", "kube_pod_status_container_ready_time"},
 		},
 		{
 			Obj: &v1.Pod{
@@ -1451,18 +1467,32 @@ func TestPodStore(t *testing.T) {
 						{
 							Type:   v1.PodReady,
 							Status: v1.ConditionFalse,
+							LastTransitionTime: metav1.Time{
+								Time: time.Unix(1501666018, 0),
+							},
+						},
+						{
+							Type:   v1.ContainersReady,
+							Status: v1.ConditionFalse,
+							LastTransitionTime: metav1.Time{
+								Time: time.Unix(1501666018, 0),
+							},
 						},
 					},
 				},
 			},
 			Want: `
+				# HELP kube_pod_status_container_ready_time [ALPHA] Readiness achieved time in unix timestamp for a pod containers.
 				# HELP kube_pod_status_ready [STABLE] Describes whether the pod is ready to serve requests.
+				# HELP kube_pod_status_ready_time [ALPHA] Readiness achieved time in unix timestamp for a pod.
+				# TYPE kube_pod_status_container_ready_time gauge
 				# TYPE kube_pod_status_ready gauge
+				# TYPE kube_pod_status_ready_time gauge
 				kube_pod_status_ready{condition="false",namespace="ns2",pod="pod2",uid="uid2"} 1
 				kube_pod_status_ready{condition="true",namespace="ns2",pod="pod2",uid="uid2"} 0
 				kube_pod_status_ready{condition="unknown",namespace="ns2",pod="pod2",uid="uid2"} 0
 			`,
-			MetricNames: []string{"kube_pod_status_ready"},
+			MetricNames: []string{"kube_pod_status_ready", "kube_pod_status_ready_time", "kube_pod_status_container_ready_time"},
 		},
 		{
 			Obj: &v1.Pod{
@@ -2079,7 +2109,7 @@ func BenchmarkPodStore(b *testing.B) {
 		},
 	}
 
-	expectedFamilies := 47
+	expectedFamilies := 49
 	for n := 0; n < b.N; n++ {
 		families := f(pod)
 		if len(families) != expectedFamilies {
