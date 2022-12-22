@@ -15,8 +15,8 @@ GIT_COMMIT ?= $(shell git rev-parse --short HEAD)
 OS ?= $(shell uname -s | tr A-Z a-z)
 ALL_ARCH = amd64 arm arm64 ppc64le s390x
 PKG = github.com/prometheus/common
-PROMETHEUS_VERSION = 2.37.0
-GO_VERSION = 1.19.2
+PROMETHEUS_VERSION = 2.40.6
+GO_VERSION = 1.19.4
 IMAGE = $(REGISTRY)/kube-state-metrics
 MULTI_ARCH_IMG = $(IMAGE)-$(ARCH)
 USER ?= $(shell id -u -n)
@@ -78,7 +78,7 @@ shellcheck:
 # the two.
 test-benchmark-compare:
 	@git fetch
-	./tests/compare_benchmarks.sh master
+	./tests/compare_benchmarks.sh main
 	./tests/compare_benchmarks.sh ${LATEST_RELEASE_BRANCH}
 
 all: all-container

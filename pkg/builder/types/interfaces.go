@@ -35,7 +35,8 @@ import (
 type BuilderInterface interface {
 	WithMetrics(r prometheus.Registerer)
 	WithEnabledResources(c []string) error
-	WithNamespaces(n options.NamespaceList, nsFilter string)
+	WithNamespaces(n options.NamespaceList)
+	WithFieldSelectorFilter(fieldSelectors string)
 	WithSharding(shard int32, totalShards int)
 	WithContext(ctx context.Context)
 	WithKubeClient(c clientset.Interface)
@@ -44,13 +45,13 @@ type BuilderInterface interface {
 	WithUsingAPIServerCache(u bool)
 	WithFamilyGeneratorFilter(l generator.FamilyGeneratorFilter)
 	WithAllowAnnotations(a map[string][]string)
-	WithAllowLabels(l map[string][]string)
+	WithAllowLabels(l map[string][]string) error
 	WithGenerateStoresFunc(f BuildStoresFunc)
 	WithGenerateCustomResourceStoresFunc(f BuildCustomResourceStoresFunc)
 	DefaultGenerateStoresFunc() BuildStoresFunc
 	DefaultGenerateCustomResourceStoresFunc() BuildCustomResourceStoresFunc
 	WithCustomResourceStoreFactories(fs ...customresource.RegistryFactory)
-	Build() []metricsstore.MetricsWriter
+	Build() metricsstore.MetricsWriterList
 	BuildStores() [][]cache.Store
 }
 
