@@ -27,11 +27,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
-	autoscaling "k8s.io/api/autoscaling/v2beta2"
+	autoscaling "k8s.io/api/autoscaling/v2"
 	batchv1 "k8s.io/api/batch/v1"
 	certv1 "k8s.io/api/certificates/v1"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -58,11 +59,12 @@ var _ ksmtypes.BuilderInterface = &Builder{}
 // Builder helps to build store. It follows the builder pattern
 // (https://en.wikipedia.org/wiki/Builder_pattern).
 type Builder struct {
-	kubeClient                    clientset.Interface
-	customResourceClients         map[string]interface{}
-	vpaClient                     vpaclientset.Interface
-	namespaces                    options.NamespaceList
-	namespaceFilter               string
+	kubeClient            clientset.Interface
+	customResourceClients map[string]interface{}
+	vpaClient             vpaclientset.Interface
+	namespaces            options.NamespaceList
+	// namespaceFilter is inside fieldSelectorFilter
+	fieldSelectorFilter           string
 	ctx                           context.Context
 	enabledResources              []string
 	familyGeneratorFilter         generator.FamilyGeneratorFilter
@@ -106,10 +108,19 @@ func (b *Builder) WithEnabledResources(r []string) error {
 	return nil
 }
 
+// WithFieldSelectorFilter sets the fieldSelector property of a Builder.
+func (b *Builder) WithFieldSelectorFilter(fieldSelectorFilter string) {
+	b.fieldSelectorFilter = fieldSelectorFilter
+}
+
 // WithNamespaces sets the namespaces property of a Builder.
-func (b *Builder) WithNamespaces(n options.NamespaceList, nsFilter string) {
+func (b *Builder) WithNamespaces(n options.NamespaceList) {
 	b.namespaces = n
-	b.namespaceFilter = nsFilter
+}
+
+// MergeFieldSelectors merges multiple fieldSelectors using AND operator.
+func (b *Builder) MergeFieldSelectors(selectors []string) (string, error) {
+	return options.MergeFieldSelectors(selectors)
 }
 
 // WithSharding sets the shard and totalShards property of a Builder.
@@ -200,21 +211,35 @@ func (b *Builder) WithAllowAnnotations(annotations map[string][]string) {
 }
 
 // WithAllowLabels configures which labels can be returned for metrics
-func (b *Builder) WithAllowLabels(labels map[string][]string) {
+func (b *Builder) WithAllowLabels(labels map[string][]string) error {
 	if len(labels) > 0 {
+		for label := range labels {
+			if !resourceExists(label) && label != "*" {
+				return fmt.Errorf("resource %s does not exist. Available resources: %s", label, strings.Join(availableResources(), ","))
+			}
+		}
 		b.allowLabelsList = labels
+		// "*" takes precedence over other specifications
+		if allowedLabels, ok := labels["*"]; ok {
+			m := make(map[string][]string)
+			for _, resource := range b.enabledResources {
+				m[resource] = allowedLabels
+			}
+			b.allowLabelsList = m
+		}
 	}
+	return nil
 }
 
 // Build initializes and registers all enabled stores.
 // It returns metrics writers which can be used to write out
 // metrics from the stores.
-func (b *Builder) Build() []metricsstore.MetricsWriter {
+func (b *Builder) Build() metricsstore.MetricsWriterList {
 	if b.familyGeneratorFilter == nil {
 		panic("familyGeneratorFilter should not be nil")
 	}
 
-	var metricsWriters []metricsstore.MetricsWriter
+	var metricsWriters metricsstore.MetricsWriterList
 	var activeStoreNames []string
 
 	for _, c := range b.enabledResources {
@@ -222,11 +247,7 @@ func (b *Builder) Build() []metricsstore.MetricsWriter {
 		if ok {
 			stores := cacheStoresToMetricStores(constructor(b))
 			activeStoreNames = append(activeStoreNames, c)
-			if len(stores) == 1 {
-				metricsWriters = append(metricsWriters, stores[0])
-			} else {
-				metricsWriters = append(metricsWriters, metricsstore.NewMultiStoreMetricsWriter(stores))
-			}
+			metricsWriters = append(metricsWriters, metricsstore.NewMetricsWriter(stores...))
 		}
 	}
 
@@ -269,8 +290,10 @@ var availableStores = map[string]func(f *Builder) []cache.Store{
 	"daemonsets":                      func(b *Builder) []cache.Store { return b.buildDaemonSetStores() },
 	"deployments":                     func(b *Builder) []cache.Store { return b.buildDeploymentStores() },
 	"endpoints":                       func(b *Builder) []cache.Store { return b.buildEndpointsStores() },
+	"endpointslices":                  func(b *Builder) []cache.Store { return b.buildEndpointSlicesStores() },
 	"horizontalpodautoscalers":        func(b *Builder) []cache.Store { return b.buildHPAStores() },
 	"ingresses":                       func(b *Builder) []cache.Store { return b.buildIngressStores() },
+	"ingressclasses":                  func(b *Builder) []cache.Store { return b.buildIngressClassStores() },
 	"jobs":                            func(b *Builder) []cache.Store { return b.buildJobStores() },
 	"leases":                          func(b *Builder) []cache.Store { return b.buildLeasesStores() },
 	"limitranges":                     func(b *Builder) []cache.Store { return b.buildLimitRangeStores() },
@@ -328,6 +351,10 @@ func (b *Builder) buildDeploymentStores() []cache.Store {
 
 func (b *Builder) buildEndpointsStores() []cache.Store {
 	return b.buildStoresFunc(endpointMetricFamilies(b.allowAnnotationsList["endpoints"], b.allowLabelsList["endpoints"]), &v1.Endpoints{}, createEndpointsListWatch, b.useAPIServerCache)
+}
+
+func (b *Builder) buildEndpointSlicesStores() []cache.Store {
+	return b.buildStoresFunc(endpointSliceMetricFamilies(b.allowAnnotationsList["endpointslices"], b.allowLabelsList["endpointslices"]), &discoveryv1.EndpointSlice{}, createEndpointSliceListWatch, b.useAPIServerCache)
 }
 
 func (b *Builder) buildHPAStores() []cache.Store {
@@ -446,6 +473,10 @@ func (b *Builder) buildRoleBindingStores() []cache.Store {
 	return b.buildStoresFunc(roleBindingMetricFamilies(b.allowAnnotationsList["rolebindings"], b.allowLabelsList["rolebindings"]), &rbacv1.RoleBinding{}, createRoleBindingListWatch, b.useAPIServerCache)
 }
 
+func (b *Builder) buildIngressClassStores() []cache.Store {
+	return b.buildStoresFunc(ingressClassMetricFamilies(b.allowAnnotationsList["ingressclasses"], b.allowLabelsList["ingressclasses"]), &networkingv1.IngressClass{}, createIngressClassListWatch, b.useAPIServerCache)
+}
+
 func (b *Builder) buildStores(
 	metricFamilies []generator.FamilyGenerator,
 	expectedType interface{},
@@ -461,7 +492,10 @@ func (b *Builder) buildStores(
 			familyHeaders,
 			composedMetricGenFuncs,
 		)
-		listWatcher := listWatchFunc(b.kubeClient, v1.NamespaceAll, b.namespaceFilter)
+		if b.fieldSelectorFilter != "" {
+			klog.Infof("FieldSelector is used %s", b.fieldSelectorFilter)
+		}
+		listWatcher := listWatchFunc(b.kubeClient, v1.NamespaceAll, b.fieldSelectorFilter)
 		b.startReflector(expectedType, store, listWatcher, useAPIServerCache)
 		return []cache.Store{store}
 	}
@@ -472,7 +506,10 @@ func (b *Builder) buildStores(
 			familyHeaders,
 			composedMetricGenFuncs,
 		)
-		listWatcher := listWatchFunc(b.kubeClient, ns, b.namespaceFilter)
+		if b.fieldSelectorFilter != "" {
+			klog.Infof("FieldSelector is used %s", b.fieldSelectorFilter)
+		}
+		listWatcher := listWatchFunc(b.kubeClient, ns, b.fieldSelectorFilter)
 		b.startReflector(expectedType, store, listWatcher, useAPIServerCache)
 		stores = append(stores, store)
 	}
@@ -502,7 +539,10 @@ func (b *Builder) buildCustomResourceStores(resourceName string,
 			familyHeaders,
 			composedMetricGenFuncs,
 		)
-		listWatcher := listWatchFunc(customResourceClient, v1.NamespaceAll, b.namespaceFilter)
+		if b.fieldSelectorFilter != "" {
+			klog.Infof("FieldSelector is used %s", b.fieldSelectorFilter)
+		}
+		listWatcher := listWatchFunc(customResourceClient, v1.NamespaceAll, b.fieldSelectorFilter)
 		b.startReflector(expectedType, store, listWatcher, useAPIServerCache)
 		return []cache.Store{store}
 	}
@@ -513,7 +553,8 @@ func (b *Builder) buildCustomResourceStores(resourceName string,
 			familyHeaders,
 			composedMetricGenFuncs,
 		)
-		listWatcher := listWatchFunc(customResourceClient, ns, b.namespaceFilter)
+		klog.Infof("FieldSelector is used %s", b.fieldSelectorFilter)
+		listWatcher := listWatchFunc(customResourceClient, ns, b.fieldSelectorFilter)
 		b.startReflector(expectedType, store, listWatcher, useAPIServerCache)
 		stores = append(stores, store)
 	}

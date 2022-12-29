@@ -18,12 +18,18 @@ package app
 
 import (
 	"context"
+	"crypto/md5" //nolint:gosec
+	"encoding/binary"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/oklog/run"
 	"github.com/prometheus/client_golang/prometheus"
@@ -66,6 +72,16 @@ func (pl promLogger) Log(v ...interface{}) error {
 	return nil
 }
 
+// RunKubeStateMetricsWrapper runs KSM with context cancellation.
+func RunKubeStateMetricsWrapper(ctx context.Context, opts *options.Options, factories ...customresource.RegistryFactory) error {
+	err := RunKubeStateMetrics(ctx, opts, factories...)
+	if ctx.Err() == context.Canceled {
+		klog.Infoln("Restarting: kube-state-metrics, metrics will be reset")
+		return nil
+	}
+	return err
+}
+
 // RunKubeStateMetrics will build and run the kube-state-metrics.
 // Any out-of-tree custom resource metrics could be registered by newing a registry factory
 // which implements customresource.RegistryFactory and pass all factories into this function.
@@ -85,17 +101,77 @@ func RunKubeStateMetrics(ctx context.Context, opts *options.Options, factories .
 			ConstLabels: prometheus.Labels{"handler": "metrics"},
 		}, []string{"method"},
 	)
+	configHash := promauto.With(ksmMetricsRegistry).NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "kube_state_metrics_config_hash",
+			Help: "Hash of the currently loaded configuration.",
+		}, []string{"type", "filename"})
+	configSuccess := promauto.With(ksmMetricsRegistry).NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "kube_state_metrics_last_config_reload_successful",
+			Help: "Whether the last configuration reload attempt was successful.",
+		}, []string{"type", "filename"})
+	configSuccessTime := promauto.With(ksmMetricsRegistry).NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "kube_state_metrics_last_config_reload_success_timestamp_seconds",
+			Help: "Timestamp of the last successful configuration reload.",
+		}, []string{"type", "filename"})
+
 	storeBuilder.WithMetrics(ksmMetricsRegistry)
 
+	got := options.GetConfigFile(*opts)
+	if got != "" {
+		configFile, err := os.ReadFile(filepath.Clean(got))
+		if err != nil {
+			return fmt.Errorf("failed to read opts config file: %v", err)
+		}
+		// NOTE: Config value will override default values of intersecting options.
+		err = yaml.Unmarshal(configFile, opts)
+		if err != nil {
+			// DO NOT end the process.
+			// We want to allow the user to still be able to fix the misconfigured config (redeploy or edit the configmaps) and reload KSM automatically once that's done.
+			klog.Warningf("failed to unmarshal opts config file: %v", err)
+			// Wait for the next reload.
+			klog.Infof("misconfigured config detected, KSM will automatically reload on next write to the config")
+			klog.Infof("waiting for config to be fixed")
+			configSuccess.WithLabelValues("config", filepath.Clean(got)).Set(0)
+			<-ctx.Done()
+		} else {
+			configSuccess.WithLabelValues("config", filepath.Clean(got)).Set(1)
+			configSuccessTime.WithLabelValues("config", filepath.Clean(got)).SetToCurrentTime()
+			hash := md5HashAsMetricValue(configFile)
+			configHash.WithLabelValues("config", filepath.Clean(got)).Set(hash)
+		}
+	}
+
+	if opts.CustomResourceConfigFile != "" {
+		crcFile, err := os.ReadFile(filepath.Clean(opts.CustomResourceConfigFile))
+		if err != nil {
+			return fmt.Errorf("failed to read custom resource config file: %v", err)
+		}
+		configSuccess.WithLabelValues("customresourceconfig", filepath.Clean(opts.CustomResourceConfigFile)).Set(1)
+		configSuccessTime.WithLabelValues("customresourceconfig", filepath.Clean(opts.CustomResourceConfigFile)).SetToCurrentTime()
+		hash := md5HashAsMetricValue(crcFile)
+		configHash.WithLabelValues("customresourceconfig", filepath.Clean(opts.CustomResourceConfigFile)).Set(hash)
+
+	}
+
 	var resources []string
-	if len(opts.Resources) == 0 {
+	switch {
+	case len(opts.Resources) == 0 && !opts.CustomResourcesOnly:
 		klog.InfoS("Used default resources")
 		resources = options.DefaultResources.AsSlice()
 		// enable custom resource
 		for _, factory := range factories {
 			resources = append(resources, factory.Name())
 		}
-	} else {
+	case opts.CustomResourcesOnly:
+		// enable custom resource only
+		for _, factory := range factories {
+			resources = append(resources, factory.Name())
+		}
+		klog.InfoS("Used CRD resources only", "resources", resources)
+	default:
 		klog.InfoS("Used resources", "resources", opts.Resources.String())
 		resources = opts.Resources.AsSlice()
 	}
@@ -106,7 +182,13 @@ func RunKubeStateMetrics(ctx context.Context, opts *options.Options, factories .
 
 	namespaces := opts.Namespaces.GetNamespaces()
 	nsFieldSelector := namespaces.GetExcludeNSFieldSelector(opts.NamespacesDenylist)
-	storeBuilder.WithNamespaces(namespaces, nsFieldSelector)
+	nodeFieldSelector := opts.Node.GetNodeFieldSelector()
+	merged, err := storeBuilder.MergeFieldSelectors([]string{nsFieldSelector, nodeFieldSelector})
+	if err != nil {
+		return err
+	}
+	storeBuilder.WithNamespaces(namespaces)
+	storeBuilder.WithFieldSelectorFilter(merged)
 
 	allowDenyList, err := allowdenylist.New(opts.MetricAllowlist, opts.MetricDenylist)
 	if err != nil {
@@ -149,7 +231,9 @@ func RunKubeStateMetrics(ctx context.Context, opts *options.Options, factories .
 	storeBuilder.WithCustomResourceClients(customResourceClients)
 	storeBuilder.WithSharding(opts.Shard, opts.TotalShards)
 	storeBuilder.WithAllowAnnotations(opts.AnnotationsAllowList)
-	storeBuilder.WithAllowLabels(opts.LabelsAllowList)
+	if err := storeBuilder.WithAllowLabels(opts.LabelsAllowList); err != nil {
+		return fmt.Errorf("failed to set up labels allowlist: %v", err)
+	}
 
 	ksmMetricsRegistry.MustRegister(
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
@@ -178,17 +262,32 @@ func RunKubeStateMetrics(ctx context.Context, opts *options.Options, factories .
 
 	telemetryMux := buildTelemetryServer(ksmMetricsRegistry)
 	telemetryListenAddress := net.JoinHostPort(opts.TelemetryHost, strconv.Itoa(opts.TelemetryPort))
-	telemetryServer := http.Server{Handler: telemetryMux, Addr: telemetryListenAddress}
+	telemetryServer := http.Server{
+		Handler:           telemetryMux,
+		ReadHeaderTimeout: 5 * time.Second}
+	telemetryFlags := web.FlagConfig{
+		WebListenAddresses: &[]string{telemetryListenAddress},
+		WebSystemdSocket:   new(bool),
+		WebConfigFile:      &tlsConfig,
+	}
 
 	metricsMux := buildMetricsServer(m, durationVec)
 	metricsServerListenAddress := net.JoinHostPort(opts.Host, strconv.Itoa(opts.Port))
-	metricsServer := http.Server{Handler: metricsMux, Addr: metricsServerListenAddress}
+	metricsServer := http.Server{
+		Handler:           metricsMux,
+		ReadHeaderTimeout: 5 * time.Second}
+
+	metricsFlags := web.FlagConfig{
+		WebListenAddresses: &[]string{metricsServerListenAddress},
+		WebSystemdSocket:   new(bool),
+		WebConfigFile:      &tlsConfig,
+	}
 
 	// Run Telemetry server
 	{
 		g.Add(func() error {
 			klog.InfoS("Started kube-state-metrics self metrics server", "telemetryAddress", telemetryListenAddress)
-			return web.ListenAndServe(&telemetryServer, tlsConfig, promLogger)
+			return web.ListenAndServe(&telemetryServer, &telemetryFlags, promLogger)
 		}, func(error) {
 			ctxShutDown, cancel := context.WithTimeout(ctx, 3*time.Second)
 			defer cancel()
@@ -199,7 +298,7 @@ func RunKubeStateMetrics(ctx context.Context, opts *options.Options, factories .
 	{
 		g.Add(func() error {
 			klog.InfoS("Started metrics server", "metricsServerAddress", metricsServerListenAddress)
-			return web.ListenAndServe(&metricsServer, tlsConfig, promLogger)
+			return web.ListenAndServe(&metricsServer, &metricsFlags, promLogger)
 		}, func(error) {
 			ctxShutDown, cancel := context.WithTimeout(ctx, 3*time.Second)
 			defer cancel()
@@ -308,4 +407,15 @@ func buildMetricsServer(m *metricshandler.MetricsHandler, durationObserver prome
              </html>`))
 	})
 	return mux
+}
+
+// md5HashAsMetricValue creates an md5 hash and returns the most significant bytes that fit into a float64
+// Taken from https://github.com/prometheus/alertmanager/blob/6ef6e6868dbeb7984d2d577dd4bf75c65bf1904f/config/coordinator.go#L149
+func md5HashAsMetricValue(data []byte) float64 {
+	sum := md5.Sum(data) //nolint:gosec
+	// We only want 48 bits as a float64 only has a 53 bit mantissa.
+	smallSum := sum[0:6]
+	bytes := make([]byte, 8)
+	copy(bytes, smallSum)
+	return float64(binary.LittleEndian.Uint64(bytes))
 }

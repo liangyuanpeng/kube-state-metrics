@@ -1,7 +1,9 @@
 # Overview
 
 [![Build Status](https://github.com/kubernetes/kube-state-metrics/workflows/continuous-integration/badge.svg)](https://github.com/kubernetes/kube-state-metrics/actions)
-[![Go Report Card](https://goreportcard.com/badge/github.com/kubernetes/kube-state-metrics)](https://goreportcard.com/report/github.com/kubernetes/kube-state-metrics) [![GoDoc](https://godoc.org/github.com/kubernetes/kube-state-metrics?status.svg)](https://godoc.org/github.com/kubernetes/kube-state-metrics)
+[![Go Report Card](https://goreportcard.com/badge/github.com/kubernetes/kube-state-metrics)](https://goreportcard.com/report/github.com/kubernetes/kube-state-metrics)
+[![Go Reference](https://pkg.go.dev/badge/github.com/kubernetes/kube-state-metrics.svg)](https://pkg.go.dev/github.com/kubernetes/kube-state-metrics)
+[![govulncheck](https://github.com/kubernetes/kube-state-metrics/actions/workflows/govulncheck.yml/badge.svg)](https://github.com/kubernetes/kube-state-metrics/actions/workflows/govulncheck.yml)
 
 kube-state-metrics (KSM) is a simple service that listens to the Kubernetes API
 server and generates metrics about the state of the objects. (See examples in
@@ -45,6 +47,7 @@ are deleted they are no longer visible on the `/metrics` endpoint.
   - [Resource recommendation](#resource-recommendation)
   - [Horizontal sharding](#horizontal-sharding)
     - [Automated sharding](#automated-sharding)
+  - [Daemonset sharding for pod metrics](#daemonset-sharding-pod-metrics)
 - [Setup](#setup)
   - [Building the Docker container](#building-the-docker-container)
 - [Usage](#usage)
@@ -71,11 +74,11 @@ Generally, it is recommended to use the latest release of kube-state-metrics. If
 
 | kube-state-metrics | Kubernetes client-go Version |
 |--------------------|:----------------------------:|
-| **v2.3.0**         | v1.23                        |
 | **v2.4.2**         | v1.23                        |
 | **v2.5.0**         | v1.24                        |
 | **v2.6.0**         | v1.24                        |
-| **master**         | v1.25                        |
+| **v2.7.0**         | v1.25                        |
+| **main**           | v1.26                        |
 
 
 #### Resource group version compatibility
@@ -87,7 +90,7 @@ release.
 #### Container Image
 
 The latest container image can be found at:
-* `registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.6.0` (arch: `amd64`, `arm`, `arm64`, `ppc64le` and `s390x`)
+* `registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.7.0` (arch: `amd64`, `arm`, `arm64`, `ppc64le` and `s390x`)
 
 ### Metrics Documentation
 
@@ -153,7 +156,7 @@ http_request_duration_seconds_count{handler="metrics",method="get"} 30
 
 kube-state-metrics also exposes build and configuration metrics:
 ```
-kube_state_metrics_build_info{branch="master",goversion="go1.15.3",revision="6c9d775d",version="v2.0.0-beta"} 1
+kube_state_metrics_build_info{branch="main",goversion="go1.15.3",revision="6c9d775d",version="v2.0.0-beta"} 1
 kube_state_metrics_shard_ordinal{shard_ordinal="0"} 0
 kube_state_metrics_total_shards 1
 ```
@@ -162,6 +165,17 @@ kube_state_metrics_total_shards 1
 please check the blog post [here](https://www.robustperception.io/exposing-the-software-version-to-prometheus).
 Sharding metrics expose `--shard` and `--total-shards` flags and can be used to validate
 run-time configuration, see [`/examples/prometheus-alerting-rules`](./examples/prometheus-alerting-rules).
+
+kube-state-metrics also exposes metrics about it config file and the Custom Resource State config file:
+
+```
+kube_state_metrics_config_hash{filename="crs.yml",type="customresourceconfig"} 2.38272279311849e+14
+kube_state_metrics_config_hash{filename="config.yml",type="config"} 2.65285922340846e+14
+kube_state_metrics_last_config_reload_success_timestamp_seconds{filename="crs.yml",type="customresourceconfig"} 1.6704882592037103e+09
+kube_state_metrics_last_config_reload_success_timestamp_seconds{filename="config.yml",type="config"} 1.6704882592035313e+09
+kube_state_metrics_last_config_reload_successful{filename="crs.yml",type="customresourceconfig"} 1
+kube_state_metrics_last_config_reload_successful{filename="config.yml",type="config"} 1
+```
 
 ### Scaling kube-state-metrics
 
@@ -234,6 +248,36 @@ To enable automated sharding, kube-state-metrics must be run by a `StatefulSet` 
 This way of deploying shards is useful when you want to manage KSM shards through a single Kubernetes resource (a single `StatefulSet` in this case) instead of having one `Deployment` per shard. The advantage can be especially significant when deploying a high number of shards.
 
 The downside of using an auto-sharded setup comes from the rollout strategy supported by `StatefulSet`s. When managed by a `StatefulSet`, pods are replaced one at a time with each pod first getting terminated and then recreated. Besides such rollouts being slower, they will also lead to short downtime for each shard. If a Prometheus scrape happens during a rollout, it can miss some of the metrics exported by kube-state-metrics.
+
+### Daemonset sharding for pod metrics
+
+For pod metrics, they can be sharded per node with the following flag:
+* `--node`
+
+Each kube-state-metrics pod uses FieldSelector (spec.nodeName) to watch/list pod metrics only on the same node.
+
+A daemonset kube-state-metrics example:
+```
+apiVersion: apps/v1
+kind: DaemonSet
+spec:
+  template:
+    spec:
+      containers:
+      - image: registry.k8s.io/kube-state-metrics/kube-state-metrics:IMAGE_TAG
+        name: kube-state-metrics
+        args:
+        - --resource=pods
+        - --node=$(NODE_NAME)
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: spec.nodeName
+```
+
+Other metrics can be sharded via [Horizontal sharding](#horizontal-sharding).
 
 ### Setup
 

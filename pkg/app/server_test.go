@@ -73,11 +73,14 @@ func BenchmarkKubeStateMetrics(b *testing.B) {
 
 	builder := store.NewBuilder()
 	builder.WithMetrics(reg)
-	builder.WithEnabledResources(options.DefaultResources.AsSlice())
+	err := builder.WithEnabledResources(options.DefaultResources.AsSlice())
+	if err != nil {
+		b.Fatal(err)
+	}
 	builder.WithKubeClient(kubeClient)
 	builder.WithSharding(0, 1)
 	builder.WithContext(ctx)
-	builder.WithNamespaces(options.DefaultNamespaces, "")
+	builder.WithNamespaces(options.DefaultNamespaces)
 	builder.WithGenerateStoresFunc(builder.DefaultGenerateStoresFunc())
 
 	allowDenyListFilter, err := allowdenylist.New(map[string]struct{}{}, map[string]struct{}{})
@@ -118,7 +121,10 @@ func BenchmarkKubeStateMetrics(b *testing.B) {
 
 			b.StopTimer()
 			buf := bytes.Buffer{}
-			buf.ReadFrom(resp.Body)
+			_, err := buf.ReadFrom(resp.Body)
+			if err != nil {
+				b.Fatal(err)
+			}
 			accumulatedContentLength += buf.Len()
 			b.StartTimer()
 		}
@@ -144,9 +150,12 @@ func TestFullScrapeCycle(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	builder := store.NewBuilder()
 	builder.WithMetrics(reg)
-	builder.WithEnabledResources(options.DefaultResources.AsSlice())
+	err = builder.WithEnabledResources(options.DefaultResources.AsSlice())
+	if err != nil {
+		t.Fatal(err)
+	}
 	builder.WithKubeClient(kubeClient)
-	builder.WithNamespaces(options.DefaultNamespaces, "")
+	builder.WithNamespaces(options.DefaultNamespaces)
 	builder.WithGenerateStoresFunc(builder.DefaultGenerateStoresFunc())
 
 	l, err := allowdenylist.New(map[string]struct{}{}, map[string]struct{}{})
@@ -193,8 +202,8 @@ func TestFullScrapeCycle(t *testing.T) {
 	expected := `# HELP kube_pod_annotations Kubernetes annotations converted to Prometheus labels.
 # HELP kube_pod_completion_time [STABLE] Completion time in unix timestamp for a pod.
 # HELP kube_pod_container_info [STABLE] Information about a container in a pod.
-# HELP kube_pod_container_resource_limits The number of requested limit resource by a container.
-# HELP kube_pod_container_resource_requests The number of requested request resource by a container.
+# HELP kube_pod_container_resource_limits The number of requested limit resource by a container. It is recommended to use the kube_pod_resource_limits metric exposed by kube-scheduler instead, as it is more precise.
+# HELP kube_pod_container_resource_requests The number of requested request resource by a container. It is recommended to use the kube_pod_resource_requests metric exposed by kube-scheduler instead, as it is more precise.
 # HELP kube_pod_container_state_started [STABLE] Start time in unix timestamp for a pod container.
 # HELP kube_pod_container_status_last_terminated_exitcode Describes the exit code for the last container in terminated state.
 # HELP kube_pod_container_status_last_terminated_reason Describes the last reason the container was in terminated state.
@@ -317,9 +326,9 @@ kube_pod_container_status_waiting_reason{namespace="default",pod="pod0",uid="abc
 kube_pod_container_status_waiting{namespace="default",pod="pod0",uid="abc-0",container="pod1_con1"} 1
 kube_pod_container_status_waiting{namespace="default",pod="pod0",uid="abc-0",container="pod1_con2"} 0
 kube_pod_created{namespace="default",pod="pod0",uid="abc-0"} 1.5e+09
-kube_pod_info{namespace="default",pod="pod0",uid="abc-0",host_ip="1.1.1.1",pod_ip="1.2.3.4",node="node1",created_by_kind="<none>",created_by_name="<none>",priority_class="",host_network="false"} 1
+kube_pod_info{namespace="default",pod="pod0",uid="abc-0",host_ip="1.1.1.1",pod_ip="1.2.3.4",node="node1",created_by_kind="",created_by_name="",priority_class="",host_network="false"} 1
 kube_pod_labels{namespace="default",pod="pod0",uid="abc-0"} 1
-kube_pod_owner{namespace="default",pod="pod0",uid="abc-0",owner_kind="<none>",owner_name="<none>",owner_is_controller="<none>"} 1
+kube_pod_owner{namespace="default",pod="pod0",uid="abc-0",owner_kind="",owner_name="",owner_is_controller=""} 1
 kube_pod_restart_policy{namespace="default",pod="pod0",uid="abc-0",type="Always"} 1
 kube_pod_status_phase{namespace="default",pod="pod0",uid="abc-0",phase="Failed"} 0
 kube_pod_status_phase{namespace="default",pod="pod0",uid="abc-0",phase="Pending"} 0
@@ -432,9 +441,12 @@ func TestShardingEquivalenceScrapeCycle(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	unshardedBuilder := store.NewBuilder()
 	unshardedBuilder.WithMetrics(reg)
-	unshardedBuilder.WithEnabledResources(options.DefaultResources.AsSlice())
+	err = unshardedBuilder.WithEnabledResources(options.DefaultResources.AsSlice())
+	if err != nil {
+		t.Fatal(err)
+	}
 	unshardedBuilder.WithKubeClient(kubeClient)
-	unshardedBuilder.WithNamespaces(options.DefaultNamespaces, "")
+	unshardedBuilder.WithNamespaces(options.DefaultNamespaces)
 	unshardedBuilder.WithFamilyGeneratorFilter(l)
 	unshardedBuilder.WithAllowLabels(map[string][]string{})
 	unshardedBuilder.WithGenerateStoresFunc(unshardedBuilder.DefaultGenerateStoresFunc())
@@ -445,9 +457,12 @@ func TestShardingEquivalenceScrapeCycle(t *testing.T) {
 	regShard1 := prometheus.NewRegistry()
 	shardedBuilder1 := store.NewBuilder()
 	shardedBuilder1.WithMetrics(regShard1)
-	shardedBuilder1.WithEnabledResources(options.DefaultResources.AsSlice())
+	err = shardedBuilder1.WithEnabledResources(options.DefaultResources.AsSlice())
+	if err != nil {
+		t.Fatal(err)
+	}
 	shardedBuilder1.WithKubeClient(kubeClient)
-	shardedBuilder1.WithNamespaces(options.DefaultNamespaces, "")
+	shardedBuilder1.WithNamespaces(options.DefaultNamespaces)
 	shardedBuilder1.WithFamilyGeneratorFilter(l)
 	shardedBuilder1.WithAllowLabels(map[string][]string{})
 	shardedBuilder1.WithGenerateStoresFunc(shardedBuilder1.DefaultGenerateStoresFunc())
@@ -458,9 +473,12 @@ func TestShardingEquivalenceScrapeCycle(t *testing.T) {
 	regShard2 := prometheus.NewRegistry()
 	shardedBuilder2 := store.NewBuilder()
 	shardedBuilder2.WithMetrics(regShard2)
-	shardedBuilder2.WithEnabledResources(options.DefaultResources.AsSlice())
+	err = shardedBuilder2.WithEnabledResources(options.DefaultResources.AsSlice())
+	if err != nil {
+		t.Fatal(err)
+	}
 	shardedBuilder2.WithKubeClient(kubeClient)
-	shardedBuilder2.WithNamespaces(options.DefaultNamespaces, "")
+	shardedBuilder2.WithNamespaces(options.DefaultNamespaces)
 	shardedBuilder2.WithFamilyGeneratorFilter(l)
 	shardedBuilder2.WithAllowLabels(map[string][]string{})
 	shardedBuilder2.WithGenerateStoresFunc(shardedBuilder2.DefaultGenerateStoresFunc())
@@ -595,10 +613,14 @@ func TestCustomResourceExtension(t *testing.T) {
 	builder := store.NewBuilder()
 	builder.WithCustomResourceStoreFactories(factories...)
 	builder.WithMetrics(reg)
-	builder.WithEnabledResources(resources)
+	err := builder.WithEnabledResources(resources)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	builder.WithKubeClient(kubeClient)
 	builder.WithCustomResourceClients(customResourceClients)
-	builder.WithNamespaces(options.DefaultNamespaces, "")
+	builder.WithNamespaces(options.DefaultNamespaces)
 	builder.WithGenerateStoresFunc(builder.DefaultGenerateStoresFunc())
 	builder.WithGenerateCustomResourceStoresFunc(builder.DefaultGenerateCustomResourceStoresFunc())
 

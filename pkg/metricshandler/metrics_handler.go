@@ -51,7 +51,7 @@ type MetricsHandler struct {
 
 	// mtx protects metricsWriters, curShard, and curTotalShards
 	mtx            *sync.RWMutex
-	metricsWriters []metricsstore.MetricsWriter
+	metricsWriters metricsstore.MetricsWriterList
 	curShard       int32
 	curTotalShards int
 }
@@ -200,12 +200,18 @@ func (m *MetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, w := range m.metricsWriters {
-		w.WriteAll(writer)
+		err := w.WriteAll(writer)
+		if err != nil {
+			klog.ErrorS(err, "Failed to write metrics")
+		}
 	}
 
 	// In case we gzipped the response, we have to close the writer.
 	if closer, ok := writer.(io.Closer); ok {
-		closer.Close()
+		err := closer.Close()
+		if err != nil {
+			klog.ErrorS(err, "Failed to close the writer")
+		}
 	}
 }
 
@@ -226,7 +232,7 @@ func shardingSettingsFromStatefulSet(ss *appsv1.StatefulSet, podName string) (no
 
 func detectNominalFromPod(statefulSetName, podName string) (int32, error) {
 	nominalString := strings.TrimPrefix(podName, statefulSetName+"-")
-	nominal, err := strconv.Atoi(nominalString)
+	nominal, err := strconv.ParseInt(nominalString, 10, 32)
 	if err != nil {
 		return 0, fmt.Errorf("failed to detect shard index for Pod %s of StatefulSet %s, parsed %s: %w", podName, statefulSetName, nominalString, err)
 	}

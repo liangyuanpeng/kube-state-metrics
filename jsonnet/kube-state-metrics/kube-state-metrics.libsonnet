@@ -115,6 +115,13 @@
         verbs: ['list', 'watch'],
       },
       {
+        apiGroups: ['discovery.k8s.io'],
+        resources: [
+          'endpointslices',
+        ],
+        verbs: ['list', 'watch'],
+      },
+      {
         apiGroups: ['storage.k8s.io'],
         resources: [
           'storageclasses',
@@ -134,6 +141,7 @@
         apiGroups: ['networking.k8s.io'],
         resources: [
           'networkpolicies',
+          'ingressclasses',
           'ingresses',
         ],
         verbs: ['list', 'watch'],

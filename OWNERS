@@ -1,7 +1,10 @@
 reviewers:
+  - CatherineF-dev
   - dgrisonnet
   - fpetkovski
+  - logicalhan
   - mrueg
+  - rexagod
 approvers:
   - dgrisonnet
   - fpetkovski

@@ -212,7 +212,8 @@ func jobMetricFamilies(allowAnnotationsList, allowLabelsList []string) []generat
 					}
 				}
 
-				for _, condition := range j.Status.Conditions {
+				for _, c := range j.Status.Conditions {
+					condition := c
 					if condition.Type == v1batch.JobFailed {
 						reasonKnown := false
 						for _, reason := range jobFailureReasons {
@@ -363,7 +364,7 @@ func jobMetricFamilies(allowAnnotationsList, allowLabelsList []string) []generat
 						Metrics: []*metric.Metric{
 							{
 								LabelKeys:   labelKeys,
-								LabelValues: []string{"<none>", "<none>", "<none>"},
+								LabelValues: []string{"", "", ""},
 								Value:       1,
 							},
 						},

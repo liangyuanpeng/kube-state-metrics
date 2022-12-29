@@ -162,7 +162,7 @@ func createPodContainerInfoFamilyGenerator() generator.FamilyGenerator {
 func createPodContainerResourceLimitsFamilyGenerator() generator.FamilyGenerator {
 	return *generator.NewFamilyGenerator(
 		"kube_pod_container_resource_limits",
-		"The number of requested limit resource by a container.",
+		"The number of requested limit resource by a container. It is recommended to use the kube_pod_resource_limits metric exposed by kube-scheduler instead, as it is more precise.",
 		metric.Gauge,
 		"",
 		wrapPodFunc(func(p *v1.Pod) *metric.Family {
@@ -225,7 +225,7 @@ func createPodContainerResourceLimitsFamilyGenerator() generator.FamilyGenerator
 func createPodContainerResourceRequestsFamilyGenerator() generator.FamilyGenerator {
 	return *generator.NewFamilyGenerator(
 		"kube_pod_container_resource_requests",
-		"The number of requested request resource by a container.",
+		"The number of requested request resource by a container. It is recommended to use the kube_pod_resource_requests metric exposed by kube-scheduler instead, as it is more precise.",
 		metric.Gauge,
 		"",
 		wrapPodFunc(func(p *v1.Pod) *metric.Family {
@@ -599,8 +599,8 @@ func createPodInfoFamilyGenerator() generator.FamilyGenerator {
 		"",
 		wrapPodFunc(func(p *v1.Pod) *metric.Family {
 			createdBy := metav1.GetControllerOf(p)
-			createdByKind := "<none>"
-			createdByName := "<none>"
+			createdByKind := ""
+			createdByName := ""
 			if createdBy != nil {
 				if createdBy.Kind != "" {
 					createdByKind = createdBy.Kind
@@ -1120,7 +1120,7 @@ func createPodOwnerFamilyGenerator() generator.FamilyGenerator {
 					Metrics: []*metric.Metric{
 						{
 							LabelKeys:   labelKeys,
-							LabelValues: []string{"<none>", "<none>", "<none>"},
+							LabelValues: []string{"", "", ""},
 							Value:       1,
 						},
 					},
@@ -1320,10 +1320,11 @@ func createPodStatusPhaseFamilyGenerator() generator.FamilyGenerator {
 }
 
 func createPodStatusContainerReadyTimeFamilyGenerator() generator.FamilyGenerator {
-	return *generator.NewFamilyGenerator(
+	return *generator.NewFamilyGeneratorWithStability(
 		"kube_pod_status_container_ready_time",
 		"Readiness achieved time in unix timestamp for a pod containers.",
 		metric.Gauge,
+		basemetrics.ALPHA,
 		"",
 		wrapPodFunc(func(p *v1.Pod) *metric.Family {
 			ms := []*metric.Metric{}
@@ -1346,10 +1347,11 @@ func createPodStatusContainerReadyTimeFamilyGenerator() generator.FamilyGenerato
 }
 
 func createPodStatusReadyTimeFamilyGenerator() generator.FamilyGenerator {
-	return *generator.NewFamilyGenerator(
+	return *generator.NewFamilyGeneratorWithStability(
 		"kube_pod_status_ready_time",
 		"Readiness achieved time in unix timestamp for a pod.",
 		metric.Gauge,
+		basemetrics.ALPHA,
 		"",
 		wrapPodFunc(func(p *v1.Pod) *metric.Family {
 			ms := []*metric.Metric{}

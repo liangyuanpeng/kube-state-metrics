@@ -76,15 +76,19 @@ func TestWriteAllWithSingleStore(t *testing.T) {
 			},
 		},
 	}
-	for _, svc := range svcs {
+	for _, s := range svcs {
+		svc := s
 		if err := store.Add(&svc); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	multiNsWriter := metricsstore.NewMultiStoreMetricsWriter([]*metricsstore.MetricsStore{store})
+	multiNsWriter := metricsstore.NewMetricsWriter(store)
 	w := strings.Builder{}
-	multiNsWriter.WriteAll(&w)
+	err := multiNsWriter.WriteAll(&w)
+	if err != nil {
+		t.Fatalf("failed to write metrics: %v", err)
+	}
 	result := w.String()
 
 	resultLines := strings.Split(strings.TrimRight(result, "\n"), "\n")
@@ -160,7 +164,8 @@ func TestWriteAllWithMultipleStores(t *testing.T) {
 			},
 		},
 	}
-	for _, svc := range svcs1 {
+	for _, s := range svcs1 {
+		svc := s
 		if err := s1.Add(&svc); err != nil {
 			t.Fatal(err)
 		}
@@ -183,15 +188,19 @@ func TestWriteAllWithMultipleStores(t *testing.T) {
 		},
 	}
 	s2 := metricsstore.NewMetricsStore([]string{"Info 1 about services", "Info 2 about services"}, genFunc)
-	for _, svc := range svcs2 {
+	for _, s := range svcs2 {
+		svc := s
 		if err := s2.Add(&svc); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	multiNsWriter := metricsstore.NewMultiStoreMetricsWriter([]*metricsstore.MetricsStore{s1, s2})
+	multiNsWriter := metricsstore.NewMetricsWriter(s1, s2)
 	w := strings.Builder{}
-	multiNsWriter.WriteAll(&w)
+	err := multiNsWriter.WriteAll(&w)
+	if err != nil {
+		t.Fatalf("failed to write metrics: %v", err)
+	}
 	result := w.String()
 
 	resultLines := strings.Split(strings.TrimRight(result, "\n"), "\n")
